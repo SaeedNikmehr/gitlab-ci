@@ -1,0 +1,55 @@
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: always
+    - when: never
+
+image: registry.gitlab.com/image_name:image_version
+
+stages:
+  - test
+  - deploy
+
+services:
+  - mysql:8.0
+
+variables:
+  MYSQL_DATABASE: laravel
+  MYSQL_ROOT_PASSWORD: secret
+  DB_HOST: mysql
+  DB_USERNAME: root
+
+unit_test_job:
+  tags:
+    - gitlab-runner #for specific runners
+  stage: test
+  cache:
+    # We key the cache using the branch's unique identifier.
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+        # We only want to cache the vendor folder.
+        - vendor/
+
+  script:
+    - cp .env.example .env
+    - composer install --prefer-dist
+    - php artisan key:generate
+    - php artisan migrate
+    - php artisan db:seed
+    - vendor/bin/phpunit --coverage-text #--colors=never
+
+deploy_job:
+  tags:
+    - gitlab-runner #for specific runners
+  stage: deploy
+  script:
+    - eval $(ssh-agent -s)
+    - ssh-add <(echo "$SSH_PRIVATE_KEY")
+    - mkdir -p ~/.ssh
+    - echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config
+    - ~/.composer/vendor/bin/envoy run deploy --commit="$CI_COMMIT_SHA"
+  environment:
+    name: production
+    url: http://project_url.com
+  when: manual
+  
